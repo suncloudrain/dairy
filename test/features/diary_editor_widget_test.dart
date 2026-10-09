@@ -29,7 +29,7 @@ void main() {
     'opening empty editor creates nothing; typing auto saves and reloads',
     (tester) async {
       await start(tester);
-      await tester.tap(find.text('写今天'));
+      await tester.tap(find.byTooltip('写今天'));
       await tester.pumpAndSettle();
       expect(await dependencies.diaries.listActive(), isEmpty);
       expect(find.text('输入后自动保存'), findsOneWidget);
@@ -74,7 +74,7 @@ void main() {
     'system back flushes immediately and today reopens the same diary',
     (tester) async {
       await start(tester);
-      await tester.tap(find.text('写今天'));
+      await tester.tap(find.byTooltip('写今天'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('diary-body')),
@@ -84,7 +84,7 @@ void main() {
       await tester.pumpAndSettle();
       final first = (await dependencies.diaries.listActive()).single;
       expect(first.body, '返回前的最后一句');
-      await tester.tap(find.text('写今天'));
+      await tester.tap(find.byTooltip('写今天'));
       await tester.pumpAndSettle();
       expect(find.text('编辑日记'), findsOneWidget);
       await tester.enterText(find.byKey(const ValueKey('diary-body')), '');
@@ -102,7 +102,7 @@ void main() {
     'late duplicate date alerts and preserves both existing data and draft input',
     (tester) async {
       await start(tester);
-      await tester.tap(find.text('写今天'));
+      await tester.tap(find.byTooltip('写今天'));
       await tester.pumpAndSettle();
       final original = await dependencies.diaries.save(
         id: dependencies.diaries.newId(),
@@ -139,7 +139,7 @@ void main() {
     tester,
   ) async {
     await start(tester);
-    await tester.tap(find.text('写今天'));
+    await tester.tap(find.byTooltip('写今天'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('diary-body')),
@@ -156,7 +156,7 @@ void main() {
     'storage failure blocks leaving and retry persists retained input',
     (tester) async {
       await start(tester);
-      await tester.tap(find.text('写今天'));
+      await tester.tap(find.byTooltip('写今天'));
       await tester.pumpAndSettle();
       await database.connection.execute('''
       CREATE TRIGGER reject_test_save BEFORE INSERT ON diary_entries
@@ -170,7 +170,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('保存失败，当前输入已保留，请重试。'), findsOneWidget);
       expect(find.text('已保存'), findsNothing);
-      await tester.binding.handlePopRoute();
+      await tester.tap(find.text('保存并返回'));
       await tester.pumpAndSettle();
       expect(find.text('新建日记'), findsOneWidget);
       expect(await dependencies.diaries.listActive(), isEmpty);
@@ -190,9 +190,92 @@ void main() {
         (await dependencies.diaries.listActive()).single.body,
         '失败后要保留的正文',
       );
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.text('保存并返回'));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('diary-body')), findsNothing);
       expect(find.text('暂无日记'), findsNothing);
+    },
+  );
+
+  testWidgets('save and return from an untouched editor creates no record', (
+    tester,
+  ) async {
+    await start(tester);
+    expect(find.text('写今天'), findsNothing);
+    final pencil = tester.widget<FloatingActionButton>(
+      find.byType(FloatingActionButton),
+    );
+    expect(pencil.tooltip, '写今天');
+    expect((pencil.child! as Icon).icon, Icons.edit_outlined);
+    await tester.tap(find.byTooltip('写今天'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存并返回'));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无日记'), findsOneWidget);
+    expect(find.byKey(const ValueKey('diary-body')), findsNothing);
+    expect(await dependencies.diaries.listActive(), isEmpty);
+  });
+
+  testWidgets('save and return flushes the latest input and reuses its diary', (
+    tester,
+  ) async {
+    await start(tester);
+    await tester.tap(find.byTooltip('写今天'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('diary-title')), '完成写作');
+    await tester.enterText(find.byKey(const ValueKey('diary-body')), '立即保存的正文');
+    await tester.tap(find.text('保存并返回'));
+    await tester.pumpAndSettle();
+    final original = (await dependencies.diaries.listActive()).single;
+    expect(original.title, '完成写作');
+    expect(original.body, '立即保存的正文');
+    expect(find.byKey(const ValueKey('diary-body')), findsNothing);
+    await tester.tap(find.byTooltip('写今天'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('diary-body')), '最后一次修改');
+    await tester.tap(find.text('保存并返回'));
+    await tester.pumpAndSettle();
+    final edited = (await dependencies.diaries.listActive()).single;
+    expect(edited.id, original.id);
+    expect(edited.body, '最后一次修改');
+    expect(edited.createdAt, original.createdAt);
+    expect(edited.date, original.date);
+  });
+
+  testWidgets(
+    'list shows one date for untitled diaries without changing data',
+    (tester) async {
+      final titled = await dependencies.diaries.save(
+        id: dependencies.diaries.newId(),
+        date: LocalDate(2026, 10, 9),
+        title: '有标题的日记',
+        body: '有标题正文',
+      );
+      final untitled = await dependencies.diaries.save(
+        id: dependencies.diaries.newId(),
+        date: LocalDate(2026, 10, 8),
+        body: '无标题正文',
+      );
+      final empty = await dependencies.diaries.save(
+        id: dependencies.diaries.newId(),
+        date: LocalDate(2026, 10, 7),
+        body: '',
+      );
+      await start(tester);
+      expect(find.text('有标题的日记'), findsOneWidget);
+      expect(find.text('2026-10-09\n有标题正文'), findsOneWidget);
+      expect(find.text('2026-10-08'), findsOneWidget);
+      expect(find.text('无标题正文'), findsOneWidget);
+      expect(find.text('2026-10-07'), findsOneWidget);
+      expect(find.text('暂无正文'), findsOneWidget);
+      expect(
+        (await dependencies.diaries.findById(titled.id))!.title,
+        titled.title,
+      );
+      expect((await dependencies.diaries.findById(untitled.id))!.title, isNull);
+      final storedEmpty = (await dependencies.diaries.findById(empty.id))!;
+      expect(storedEmpty.title, isNull);
+      expect(storedEmpty.body, '');
     },
   );
 }

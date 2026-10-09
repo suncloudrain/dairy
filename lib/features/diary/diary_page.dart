@@ -127,12 +127,12 @@ class _DiaryPageState extends State<DiaryPage> {
     ),
     floatingActionButton: widget.deleted
         ? null
-        : FloatingActionButton.extended(
+        : FloatingActionButton(
             onPressed: _opening
                 ? null
                 : () => _openDate(LocalDate.fromDateTime(DateTime.now())),
-            icon: const Icon(Icons.edit_outlined),
-            label: const Text('写今天'),
+            tooltip: '写今天',
+            child: const Icon(Icons.edit_outlined),
           ),
     body: ListenableBuilder(
       listenable: _model,
@@ -162,17 +162,19 @@ class _DiaryPageState extends State<DiaryPage> {
               itemCount: _model.entries.length,
               itemBuilder: (context, index) {
                 final entry = _model.entries[index];
+                final hasTitle = entry.title?.trim().isNotEmpty ?? false;
+                final preview = entry.body.trim().isEmpty ? '暂无正文' : entry.body;
                 return ListTile(
                   onTap: widget.deleted || _opening
                       ? null
                       : () => _openDate(entry.date, entry: entry),
-                  title: Text(entry.title ?? entry.date.toString()),
+                  title: Text(hasTitle ? entry.title! : entry.date.toString()),
                   subtitle: Text(
-                    '${entry.date}\n${entry.body}',
-                    maxLines: 3,
+                    hasTitle ? '${entry.date}\n$preview' : preview,
+                    maxLines: hasTitle ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  isThreeLine: true,
+                  isThreeLine: hasTitle,
                 );
               },
             ),

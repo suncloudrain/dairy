@@ -147,6 +147,12 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
         appBar: AppBar(
           leading: BackButton(onPressed: _leaving ? null : _leave),
           title: Text(_model.entry == null ? '新建日记' : '编辑日记'),
+          actions: [
+            TextButton(
+              onPressed: _leaving ? null : _leave,
+              child: const Text('保存并返回'),
+            ),
+          ],
         ),
         body: AbsorbPointer(
           absorbing: _leaving,
