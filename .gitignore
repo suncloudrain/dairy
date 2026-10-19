@@ -24,3 +24,9 @@ Thumbs.db
 /dairy.exe
 /*.dll
 /data/
+
+# Local project guidance and documentation
+/.agents/
+/docs/
+/AGENTS.md
+/CHANGELOG.md
