@@ -5,6 +5,7 @@ import '../../models/diary_entry.dart';
 import '../../models/local_date.dart';
 import 'diary_editor_page.dart';
 import 'diary_list_model.dart';
+import 'diary_trash_detail_page.dart';
 
 class DiaryPage extends StatefulWidget {
   const DiaryPage({super.key, required this.repository, this.deleted = false});
@@ -93,6 +94,22 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  Future<void> _openDeleted(DiaryEntry entry) async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) =>
+              DiaryTrashDetailPage(repository: widget.repository, entry: entry),
+        ),
+      );
+      if (mounted) await _model.load();
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -128,6 +145,7 @@ class _DiaryPageState extends State<DiaryPage> {
     floatingActionButton: widget.deleted
         ? null
         : FloatingActionButton(
+            heroTag: 'diary-write-today',
             onPressed: _opening
                 ? null
                 : () => _openDate(LocalDate.fromDateTime(DateTime.now())),
@@ -164,17 +182,27 @@ class _DiaryPageState extends State<DiaryPage> {
                 final entry = _model.entries[index];
                 final hasTitle = entry.title?.trim().isNotEmpty ?? false;
                 final preview = entry.body.trim().isEmpty ? '暂无正文' : entry.body;
+                var subtitle = hasTitle ? '${entry.date}\n$preview' : preview;
+                if (widget.deleted) {
+                  final deletedAt = entry.deletedAt!.toLocal();
+                  final localizations = MaterialLocalizations.of(context);
+                  final deletedLabel =
+                      '${localizations.formatCompactDate(deletedAt)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(deletedAt), alwaysUse24HourFormat: true)}';
+                  subtitle = '删除于：$deletedLabel\n$subtitle';
+                }
                 return ListTile(
-                  onTap: widget.deleted || _opening
+                  onTap: _opening
                       ? null
+                      : widget.deleted
+                      ? () => _openDeleted(entry)
                       : () => _openDate(entry.date, entry: entry),
                   title: Text(hasTitle ? entry.title! : entry.date.toString()),
                   subtitle: Text(
-                    hasTitle ? '${entry.date}\n$preview' : preview,
-                    maxLines: hasTitle ? 3 : 2,
+                    subtitle,
+                    maxLines: widget.deleted || hasTitle ? 3 : 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  isThreeLine: hasTitle,
+                  isThreeLine: widget.deleted || hasTitle,
                 );
               },
             ),

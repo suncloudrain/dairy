@@ -26,6 +26,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('暂无日记'), findsOneWidget);
+      // Both tab pages stay mounted; their FABs must not collide on navigation.
+      await tester.tap(find.byTooltip('写今天'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.widgetWithText(TextButton, '保存并返回'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('回收站'));
       await tester.pumpAndSettle();
       expect(find.text('回收站为空'), findsOneWidget);
@@ -34,6 +41,13 @@ void main() {
       await tester.tap(find.text('任务'));
       await tester.pumpAndSettle();
       expect(find.text('暂无任务'), findsOneWidget);
+      await tester.tap(find.byTooltip('新建任务').last);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(await database.connection.query('tasks'), isEmpty);
       await tester.tap(find.text('自定义'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
