@@ -32,6 +32,8 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
   late final TextEditingController _body;
   bool _leaving = false;
   bool _conflictAcknowledged = false;
+  bool _choosingDate = false;
+  bool _confirmingDelete = false;
 
   @override
   void initState() {
@@ -41,6 +43,7 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
       date: widget.date,
       entry: widget.entry,
       save: widget.repository.save,
+      delete: widget.repository.softDelete,
     )..addListener(_onModelChanged);
     _title = TextEditingController(text: _model.title);
     _body = TextEditingController(text: _model.body);
@@ -53,6 +56,9 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
       return;
     }
     _conflictAcknowledged = true;
+    final message = _model.failedDate == null
+        ? '已有日记不会被覆盖。当前输入已保留，请选择其他日记日期后重试。'
+        : '该日期的日记不会被覆盖，本篇日记仍保留原日期和内容。请选择其他日期。';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(
@@ -60,7 +66,7 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('该日期已有日记'),
-            content: const Text('已有日记不会被覆盖。当前输入已保留，请选择其他日记日期后重试。'),
+            content: Text(message),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -90,7 +96,7 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
   }
 
   Future<bool> _prepareToLeave() async {
-    if (_leaving) return false;
+    if (_leaving || _model.busy || _confirmingDelete) return false;
     setState(() => _leaving = true);
     FocusManager.instance.primaryFocus?.unfocus();
     final saved = await _model.flush();
@@ -111,16 +117,78 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
   }
 
   Future<void> _chooseDate() async {
+    if (_leaving || _choosingDate || _confirmingDelete || _model.busy) return;
+    _choosingDate = true;
+    FocusManager.instance.primaryFocus?.unfocus();
     final date = _model.date;
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: DateTime(date.year, date.month, date.day),
-      firstDate: DateTime(1),
-      lastDate: DateTime(9999, 12, 31),
-    );
+    DateTime? selected;
+    try {
+      selected = await showDatePicker(
+        context: context,
+        initialDate: DateTime(date.year, date.month, date.day),
+        firstDate: DateTime(1),
+        lastDate: DateTime(9999, 12, 31),
+        confirmText: _model.entry == null ? '确定' : '确认修改',
+      );
+    } finally {
+      _choosingDate = false;
+    }
     if (!mounted || selected == null) return;
+    final chosen = LocalDate.fromDateTime(selected);
+    if (_model.entry != null) {
+      await _changeDate(chosen);
+    } else {
+      _conflictAcknowledged = false;
+      _model.chooseDate(chosen);
+    }
+  }
+
+  Future<void> _changeDate(LocalDate date) async {
+    if (_leaving || _confirmingDelete || _model.busy || date == _model.date) {
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
     _conflictAcknowledged = false;
-    _model.chooseDate(LocalDate.fromDateTime(selected));
+    if (await _model.changeDate(date) && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('日记日期已修改，可继续编辑')));
+    }
+  }
+
+  Future<void> _delete() async {
+    if (_leaving ||
+        _choosingDate ||
+        _confirmingDelete ||
+        _model.busy ||
+        _model.entry == null) {
+      return;
+    }
+    _confirmingDelete = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('移入回收站？'),
+          content: const Text('当前内容将先保存，再移入回收站。之后可以在回收站恢复。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('移入回收站'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _confirmingDelete = false;
+    }
+    if (!mounted || confirmed != true) return;
+    if (await _model.deleteEntry() && mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -145,17 +213,25 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
       },
       child: Scaffold(
         appBar: AppBar(
-          leading: BackButton(onPressed: _leaving ? null : _leave),
+          leading: BackButton(
+            onPressed: _leaving || _model.busy ? null : _leave,
+          ),
           title: Text(_model.entry == null ? '新建日记' : '编辑日记'),
           actions: [
+            if (_model.entry != null)
+              IconButton(
+                tooltip: '删除日记',
+                onPressed: _leaving || _model.busy ? null : _delete,
+                icon: const Icon(Icons.delete_outline),
+              ),
             TextButton(
-              onPressed: _leaving ? null : _leave,
+              onPressed: _leaving || _model.busy ? null : _leave,
               child: const Text('保存并返回'),
             ),
           ],
         ),
         body: AbsorbPointer(
-          absorbing: _leaving,
+          absorbing: _leaving || _model.busy,
           child: Align(
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
@@ -166,10 +242,11 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
                   Row(
                     children: [
                       Expanded(child: Text('日记日期：${_model.date}')),
-                      if (_model.canChooseDate)
+                      if (_model.canChooseDate || _model.entry != null)
                         TextButton(
-                          onPressed: _chooseDate,
-                          child: const Text('选择日期'),
+                          key: const ValueKey('diary-date'),
+                          onPressed: _model.busy ? null : _chooseDate,
+                          child: Text(_model.entry == null ? '选择日期' : '修改日期'),
                         ),
                     ],
                   ),
@@ -208,6 +285,7 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
                       DiarySaveStatus.saving => '保存中…',
                       DiarySaveStatus.saved => '已保存',
                       DiarySaveStatus.failed => _model.error!,
+                      DiarySaveStatus.deleted => '已移入回收站',
                     },
                     key: const ValueKey('diary-save-status'),
                     style: _model.error == null
@@ -218,8 +296,25 @@ class _DiaryEditorPageState extends State<DiaryEditorPage>
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton(
-                        onPressed: () => unawaited(_model.flush()),
-                        child: const Text('重试保存'),
+                        onPressed: () {
+                          if (_model.deleteFailed) {
+                            unawaited(_delete());
+                            return;
+                          }
+                          final failedDate = _model.failedDate;
+                          if (failedDate != null) {
+                            unawaited(_changeDate(failedDate));
+                          } else {
+                            unawaited(_model.flush());
+                          }
+                        },
+                        child: Text(
+                          _model.deleteFailed
+                              ? '重试删除'
+                              : _model.failedDate == null
+                              ? '重试保存'
+                              : '重试修改日期',
+                        ),
                       ),
                     ),
                 ],

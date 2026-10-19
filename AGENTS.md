@@ -48,3 +48,23 @@ After implementing a meaningful feature, explain:
 - the responsibility of those files;
 - the data flow of the feature;
 - how the implementation can be manually verified.
+
+## Feature development workflow
+
+当任务涉及新增或明显修改用户功能、业务逻辑、数据流、
+数据库结构或跨多个模块的行为时，
+使用 `$guided-feature-development` skill。
+
+在该 skill 要求确认方案时，不要在得到确认之前开始修改代码。
+
+对于拼写、简单文案、微小样式调整等低风险修改，
+不需要强制使用完整流程。
+
+Skill file: [.agents/skills/guided-feature-development/SKILL.md](.agents/skills/guided-feature-development/SKILL.md)
+
+## Local Windows test build
+
+After a successful Windows build, copy dairy.exe, its runtime DLLs and the
+complete data/ resource directory to F:\project\dairy (the owner's main
+checkout, not a Codex worktree). Keep the local bundle ignored by Git and
+close any running test application before refreshing it.

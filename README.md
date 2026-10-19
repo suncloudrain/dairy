@@ -2,22 +2,34 @@
 
 Flutter 个人日记与任务管理应用，Android / Windows，本地 SQLite，方案 A（轻量分层）。
 
-当前已实现**日记新建、编辑和自动保存**，完整 v0.1 仍在开发中。产品范围见 [PRODUCT.md](docs/PRODUCT.md)，实际结构见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)，长期取舍见 [DECISIONS.md](docs/DECISIONS.md)。
+当前已实现**日记新建、编辑、自动保存、修改日期、软删除和回收站完整流程**，以及四类任务基本功能。最新完整测试共 84 项通过；v0.1 约定的业务功能已接通，双平台完整交互和发行验收仍待完成。
 
-## 已建立的基础
+| 文档 | 回答的问题 |
+| --- | --- |
+| 本文 README | 项目现在能做什么，如何运行和手动验证 |
+| [PRODUCT.md](docs/PRODUCT.md) | 软件要做什么，v0.1 的目标行为与范围 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 当前代码如何组成，各层职责与数据流，以及哪些设计已经落地 |
+| [DECISIONS.md](docs/DECISIONS.md) | 为什么这样选择，哪些长期取舍需要记住 |
+| [CHANGELOG.md](CHANGELOG.md) | 每次改了什么、涉及哪些文件、怎么验证、还有哪些边界 |
+
+## 当前功能与开发进度
 
 - 官方 Flutter Android、Windows 平台工程；应用版本 `0.1.0+1`。
 - 应用启动、初始化失败重试、中文 Material 本地化、窄屏底部导航和宽屏侧边导航。
-- 日记列表、新建与编辑页；日记回收站和任务仍为只读列表，任务提供四类入口。
+- 日记列表、新建与编辑页；删除前确认并保存最新内容，删除后进入回收站。
+- 日记回收站按删除时间倒序展示，提供只读详情、恢复、冲突提示、手动复制正文及打开同日期现有日记。
+- 任务独立编辑页：标题、备注、DAY／MONTH／YEAR／CUSTOM 范围、手动保存与未保存离页提示。
+- 任务列表：选择自然周期、全部／未完成／已完成筛选、勾选完成与撤销、确认后软删除；验证来源与平台验收状态见下方摘要。
 - 右下角铅笔按钮（提示“写今天”）复用当天已有日记；“新建日记”可以选择日期，重复日期提示打开已有日记，不覆盖。
 - 日记列表的无标题记录只显示一次日期；空正文显示“暂无正文”，这些展示文字不会写入数据库。
 - 日记输入停顿约 800 毫秒、持续输入约 5 秒时自动保存；编辑页右上角提供“保存并返回”，与返回键共用等待最新内容写入的流程，保存失败保留输入并支持重试。
+- 已保存日记通过“修改日期”确认改期：先保存原日期下的最新内容，再提交新日期；成功后留在编辑页继续写作，冲突或失败保留原日期并允许重试。
 - SQLite schema v1：两张表、有效日记日期唯一约束、软删除、任务状态一致性约束、索引和升级入口。
 - 不可变日记／任务对象，独立日历日期与任务范围模型。
 - 仓库接口：保存、查询、日记恢复、软删除、任务完成和撤销完成。重复保存同一 ID 不会新建第二条记录。
 - 日期边界、仓库规则、数据库约束、文件持久化、拒绝降级及基础导航测试。
 
-本阶段编辑已保存日记只改变内容与修改时间，创建时间和日记日期保持不变。新建草稿可在首次保存前选择日期。修改已保存日记日期、回收站详情与删除／复制／恢复按钮、任务编辑和状态操作及完整筛选界面仍待后续实现。
+普通标题／正文编辑保留创建时间和日记日期；明确的改期操作只改变日期与修改时间，UUID 和创建时间保留。新建草稿首次保存前选择日期不会单独创建记录。删除和恢复复用原日记，不自动合并；任务暂不提供回收站、重复规则和统计汇总。
 
 ## 开发环境与运行
 
@@ -58,6 +70,12 @@ Windows 的 `flutter.cmd` 可在 PowerShell 或 CMD 中调用。它启动一个�
 | `lib/features/` | 页面及 ChangeNotifier 页面状态；不直接接触 SQL |
 | `lib/features/diary/diary_editor_page.dart` | 输入框、日期展示、保存反馈、“保存并返回”、返回保护与生命周期通知 |
 | `lib/features/diary/diary_editor_model.dart` | 草稿内容、停顿／周期定时器、串行保存、版本判断和失败重试 |
+| `lib/features/diary/diary_trash_detail_page.dart` | 回收站只读详情、用户主动复制、恢复反馈及打开现有日记 |
+| `lib/features/diary/diary_trash_detail_model.dart` | 恢复／查询仓库调用、冲突、忙碌与错误状态；不访问剪贴板或导航 |
+| `lib/features/tasks/task_editor_page.dart` | 表单输入、日期选择、手动保存、未保存返回与删除确认 |
+| `lib/features/tasks/task_editor_model.dart` | 内存表单、范围校验、保存／删除状态和失败保留 |
+| `lib/features/tasks/tasks_page.dart`、`task_list_model.dart` | 列表交互、周期／状态筛选、完成／撤销／删除及写入后刷新 |
+| `lib/features/tasks/task_period_controls.dart` | 四类范围显示、日历及年月／年份选择控件 |
 | `lib/models/` | 数据对象、日历日期和四类任务范围 |
 | `lib/data/repositories/` | 业务校验、UUID、时间赋值和事务操作入口 |
 | `lib/data/database/schema.dart` | 表、约束、索引和 schema 版本 |
@@ -70,6 +88,8 @@ Windows 的 `flutter.cmd` 可在 PowerShell 或 CMD 中调用。它启动一个�
 
 日记保存：`输入框 onChanged → 编辑状态捕获快照 → Repository.save → 事务与约束 → 返回已持久化对象 → 更新保存状态`。同一编辑会话只使用一个 UUID，旧快照成功不等于当前最新输入已保存。
 
+任务保存：`TaskEditorPage._save → TaskEditorModel.saveTask → TaskRepository.save → TaskQueries → SQLite 事务`；成功后返回任务对象，`TasksPage._openTask → TaskListModel.focusTask → load` 切换到该任务的周期／类型、重置为“全部”并重新读取。输入期间只修改内存；完成、撤销与删除在列表操作后立即提交。
+
 仓库是普通 Dart 对象，不依赖 Widget；数据库工厂和时间函数可在测试中替换。不引入状态管理包、ORM 或通用用例层。
 
 ## 数据与接口约定
@@ -79,10 +99,16 @@ Windows 的 `flutter.cmd` 可在 PowerShell 或 CMD 中调用。它启动一个�
 - 日记日期使用 `LocalDate`，任务范围使用 `TaskPeriod`；具体时刻以 UTC 毫秒入库。
 - 仓库允许保存空正文；编辑页已实现“只打开不写入、开始输入才保存”的触发规则，已保存日记清空后仍存在。
 - 普通保存拒绝修改已经软删除的记录，只有日记的显式 `restore` 可以恢复。
-- 日记删除界面尚未实现；后续删除必须复用编辑状态的提交等待能力，并在删除后停止写入。
+- 日记删除复用编辑状态的提交等待能力；保存最新内容后再软删除，成功后旧编辑会话停止写入，恢复也不会重启旧会话。
 - 期望业务错误使用 `RepositoryException`，表示日期冲突、记录不可操作和输入无效；数据库错误不会被仓库伪装成成功。
 - 页面不调用 `AppDatabase.connection`，只有数据层和数据库测试使用它。
 - v1 没有历史版本需要迁移。未来升版需补充迁移与旧库样本测试；未知升级／降级明确失败，不删库。
+
+## 根目录 Windows 测试入口
+
+Windows 构建成功后，将可运行测试副本放在项目所有者指定的 `F:\project\dairy`，而不是 Codex 工作树目录。双击 `F:\project\dairy\dairy.exe` 即可启动。当前副本来自 2026-10-17 的 debug 构建，包含日记软删除和完整回收站流程；以后成功构建 Windows 版本后更新。
+
+`dairy.exe` 需要同目录的运行库 DLL 和完整 `data/` 资源目录一起使用；这些都是构建产物，已加入 Git 忽略规则。这里的 `data/` 是 Flutter 资源，不是用户日记数据库，数据库仍由应用保存到平台应用数据目录。更新副本前先关闭正在运行的应用。
 
 ## 手动验收基础工程
 
@@ -96,49 +122,75 @@ Windows 的 `flutter.cmd` 可在 PowerShell 或 CMD 中调用。它启动一个�
 
 遇到保存失败时页面显示错误与“重试保存”，返回不会丢弃当前输入。进入后台或收到可取消退出通知时尽力提交；强制结束／断电不保证尚未写入的最后输入能够恢复。编辑页返回统一经过提交等待，因此 Android 系统返回使用此路径，预测性返回动画目前不是验收目标。
 
-## 验证记录
+## 手动验收日记改期（待执行）
 
-2026-10-08 已执行：
+1. 打开一篇已保存日记，输入一句新正文，点击“修改日期”，选择一个没有日记的日期并“确认修改”。
+2. 确认仍在编辑页，显示新日期，正文保持不变；继续输入并等待自动保存。
+3. 点击“保存并返回”，列表按新日期显示该篇日记；重新打开并重启应用，确认日期和内容仍在。
+4. 尝试修改到另一篇已有日记的日期：应弹窗提醒，两篇内容不覆盖，本篇仍显示原日期；可再次选择其他日期。
+5. 打开日历后取消，或确认原日期，记录应保持不变。UUID 和创建时间不变由数据库测试核对。
+6. 操作失败时按“重试修改日期”重试；如果正文预提交失败，先“重试保存”。改期提交期间不能重复改期或离页。Android／Windows 分别检查输入、日期选择与返回。
 
-- Dart 格式化：通过。
-- `flutter analyze --no-pub`：通过，No issues found。
-- `flutter test --no-pub`：17 项全部通过（4 项日期模型、10 项数据层、3 项 Widget 测试）。
-- SQLite 真实文件写入／关闭／重新打开后保留内容及 UUID：通过。
-- 拒绝较新 schema 降级且不删除旧数据：通过；测试日志中的预期降级错误不代表测试失败。
-- 当日 `flutter doctor`：Flutter 可用；当时本机缺少 Android SDK 和 Visual Studio C++ 工具链，Android／Windows 真机运行及发行构建尚未验证。未配置全局 PATH，可使用上述脚本。
+## 手动验收日记软删除和回收站（待执行）
 
-2026-10-09 环境复查：
+1. 打开已有日记，输入最后一句，点击“删除日记”。先取消，确认记录仍在；再次删除并确认“移入回收站”，确认回到正常列表且该记录消失。
+2. 进入回收站，确认列表显示原日期和删除时间；打开只读详情，检查最后一句已保留。关闭并重启应用，确认记录仍在回收站。
+3. 点击“恢复”，应返回回收站并刷新；返回正常列表，确认原内容与日期恢复。
+4. 再删除这篇日记，为原日期新建另一篇。尝试恢复已删除日记，应提示冲突，两篇均不覆盖，剪贴板不自动改变。
+5. 主动点击“复制正文”，看到成功提示后点击“打开现有日记”，自行粘贴并保存；不主动粘贴时，现有正文不能自动追加。
+6. 对失败操作重试：正文保存失败时先处理保存；删除失败用“重试删除”；恢复失败继续点击“恢复”；复制失败重新复制。确认期间不要出现清空输入或假成功。
+7. Android 和 Windows 分别检查中文输入、滚动、选择／复制、返回、断网和重启。数据库测试已覆盖 UUID、创建时间保留、文件重开及旧编辑器停止写入，仍不能替代设备验收。
 
-- 已将用户安装的 Android SDK 和 Android Studio 路径记录到 Flutter 本机配置；这类机器路径不写入共享构建配置。
-- Visual Studio Community 2026：Flutter 检查通过，C++ 桌面工作负载、MSVC、CMake 和 Windows SDK 均已识别。
-- `flutter build windows --debug --no-pub`：通过，生成 `build/windows/x64/runner/Debug/dairy.exe`。此次验证了原生编译，尚未进行窗口交互或发行构建验收。
-- Android SDK 已识别，Build-Tools 36.0.0 和 Platform-Tools 已安装；已有一个 Android 37 模拟器。首次复查仍缺少 Command-line Tools、项目使用的 Android 36 平台以及 NDK 28.2.13676358；之后用户已补齐这些组件，Android toolchain 与许可状态检查通过。
-- Windows PowerShell 默认禁止脚本执行的问题通过新增 `.cmd` 命令入口处理；无需修改永久执行策略。
-- 已在 `Restricted` 策略的 Windows PowerShell 中运行 `.\tool\flutter.cmd doctor`，入口验证通过。Android 调试构建首次尝试在 Gradle 下载阶段遇到 `Connection refused`；随后通过临时 Gradle 代理配置解决，见下方构建记录。网络下载问题与脚本执行策略错误不同。
-- Flutter / Dart 未加入全局 PATH；继续使用项目脚本即可。代理检查的 NO_PROXY 提示不影响此次 Windows 构建。
+不提供永久删除、清空回收站、批量恢复、自动合并或任务回收站；这些不是本次遗漏功能。
 
-Android 组件可在 Android Studio 的 `Tools > SDK Manager`（欢迎页为 `More Actions > SDK Manager`）安装：在 SDK Platforms 选择 API 36，在 SDK Tools 选择 Command-line Tools，并通过 Show Package Details 选择 NDK 28.2.13676358；CMake 也可按 Flutter 官方环境指南安装。组件位置应使用同一个 Android SDK 目录。许可检查使用 `.\tool\flutter.cmd doctor --android-licenses`，阅读并接受必要许可；之后可执行 `.\tool\flutter.cmd build apk --debug` 验证编译，再启动模拟器或连接真机验证运行。
+## 手动验收任务功能（待执行）
 
-数据库测试采用 Windows SQLite FFI，不代替 Android sqflite 驱动的真机测试。真实旧版本升级测试在引入 v2 迁移时增加。完整产品验收仍按 PRODUCT.md 的阶段推进。
+1. 进入“任务”，点击“新建任务”；不输入直接返回，不应出现新记录。
+2. 输入标题和备注，等待几秒仍不会自动保存；点击“保存”，列表出现新任务。
+3. 点击任务修改标题／备注，保存并重新打开，内容应一致；关闭应用并重启，确认任务仍存在。
+4. 勾选完成，再撤销完成；用“已完成”“未完成”筛选确认列表随状态变化。完成时间清空与创建时间保留由数据库测试核对。
+5. 分别新建日、月、年任务，选择未来周期；保存后列表应切换到相应周期并显示新任务。通过“查看”切换周期检查结果。
+6. 新建自定义任务，选择开始日期和 5／10／30 天，也可以输入其他正整数；显示范围应包含开始日。输入 0、负数或小数，保存应提示错误。
+7. 输入后返回，分别检查“继续编辑”“放弃修改”“保存并返回”；放弃不会创建记录或覆盖已有内容。
+8. 删除任务时先取消，再确认；取消后仍存在，确认后列表消失，重启后不会重新出现。编辑页删除会明确提醒放弃尚未保存的修改。
+9. 在 Windows 调整窗口大小，在 Android 检查中文输入、软键盘、系统返回和滚动。以上流程应在两个平台分别验证。
 
-2026-10-09 日记新建与自动保存验收：
+2026-10-17 已完成软删除和回收站后的格式化、静态分析、全部测试和双平台调试构建。后续回归可在配置好 Flutter 的本机项目终端执行：
 
-- 格式化及 `flutter analyze --no-pub`：通过。
-- `flutter test --no-pub`：30 项全部通过，包含新增的 8 项编辑状态测试和 5 项编辑页面测试。
-- 自动保存的停顿／持续输入、写入中继续编辑、保存失败与同 UUID 重试、快速系统返回、后台提交、日期冲突不覆盖：通过自动化验证。
-- 使用真实 SQLite 临时文件，经编辑状态保存后关闭并重新打开数据库，内容、UUID 和创建时间保留；再次修改不改变日记日期或创建时间；清空后记录仍存在：通过。
-- `flutter build windows --debug --no-pub`：通过。真实窗口中文输入、进程关闭后重启等手动流程按上方步骤验收，本次未将 Widget／文件测试等同于实际窗口操作。
-- `flutter build apk --debug --no-pub`：首次尝试在下载 Gradle 时遇到 `Connection refused`；随后在本次构建进程的 `GRADLE_OPTS` 中指定本机 HTTP／HTTPS 代理，Gradle 9.3.1 下载与 Android 调试构建均通过，生成 `build/app/outputs/flutter-apk/app-debug.apk`。
-- 本次构建按依赖需要自动安装 Android SDK Platform 35 和 CMake 3.22.1，应用的 compileSdk 仍为 36。代理选项只在本次调用中设置并恢复，不将机器代理地址写入共享项目配置；Flutter 的 HTTP_PROXY／HTTPS_PROXY 不能替代 Gradle 的 JVM 代理配置。
-- Android APK 编译已验证，模拟器／真机的中文输入、实际重启持久化等操作仍需单独验收。下载新构建依赖时仍需可用网络与相应代理配置。
+```powershell
+.\.tools\flutter\bin\cache\dart-sdk\bin\dart.exe format lib test
+.\tool\flutter.cmd analyze --no-pub
+.\tool\flutter.cmd test --no-pub
+.\tool\flutter.cmd build windows --debug --no-pub
+.\tool\flutter.cmd build apk --debug --no-pub
+```
 
-2026-10-10 日记操作与列表显示调整：
+## 最新验证摘要
 
-- 编辑页右上角新增“保存并返回”，复用现有最新内容提交路径；自动保存、返回保护和创建时间／日记日期保留规则继续生效。
-- 无标题日记的日期只显示一次，空正文显示“暂无正文”；列表右下角改为铅笔图标，保留“写今天”提示与无障碍名称。标题／正文边框本次未调整。
-- 修改文件：两个日记页面负责按钮、导航和显示；编辑页面 Widget 测试验证相关行为；PRODUCT、ARCHITECTURE、DECISIONS 及本说明同步记录规则与理由。未新增依赖、修改数据库 schema 或新增数据保存流程。
-- 数据流：“保存并返回” → 编辑页等待 DiaryEditorModel.flush → DiaryRepository.save → SQLite 提交 → 返回并重新加载列表。展示替代文字不会写入数据库。
-- 格式化、flutter analyze --no-pub 和 git diff --check：通过。
-- flutter test --no-pub：33 项全部通过。新增空白编辑页保存返回、即时保存并复用原记录、无标题／空正文显示三项页面测试；已有保存失败测试改为验证新按钮。慢写入期间继续输入及串行提交由既有编辑状态测试覆盖。
-- flutter build windows --debug --no-pub 与 flutter build apk --debug --no-pub：均通过。Android 构建继续使用仅本次进程生效的 Gradle 代理。
-- 本次验证不包含真机／模拟器交互及发行构建；手动操作按上方验收步骤检查。
+2026-10-17：Codex 验证日记软删除和回收站，格式化、静态分析、全部 84 项测试及 Windows／Android debug 构建通过。复用 Flutter 3.47.6 / Dart 3.13.5 与包缓存，使用临时 ASCII 路径，两个平台串行构建。`F:\project\dairy` 测试副本已同步并校验，没有修改 SDK 源码、永久 PATH 或全局 Git 配置。
+
+| 检查 | 当前结果 |
+| --- | --- |
+| 静态分析 | 本次通过：`No issues found!`，使用临时 ASCII 路径 |
+| 自动化测试 | 本次 84 项全部通过，新增 7 项删除状态、5 项回收站状态／数据、8 项 Widget 测试 |
+| 本次 Dart 格式化 | 检查 37 个文件，8 个本次功能源代码／测试文件格式化；最终只读复查无变化 |
+| 本次 Windows 调试构建 | 通过：`build/windows/x64/runner/Debug/dairy.exe` |
+| 本次 Android 调试构建 | 通过：`build/app/outputs/flutter-apk/app-debug.apk` |
+| Windows 测试副本 | `F:\project\dairy` 已更新；EXE、DLL 和 data 共 13 个文件 SHA-256 与构建目录一致 |
+| 用户试用 | 2026-10-17 用户确认前次日记改期验收无问题；本次软删除／回收站尚待试用，未明确双平台逐项结果 |
+| 任务功能双平台交互与实际进程重启 | 完整清单仍待人工验收 |
+| 日记改期双平台人工验收 | 待执行上方清单；自动化测试中的文件重开与 Widget 操作已通过 |
+| 日记删除／回收站双平台人工验收 | 待执行上方清单；故障重试、冲突、手动复制及文件重开自动化已通过 |
+| 发行构建 | 待验证 |
+
+数据库拒绝降级测试会输出“Database downgrade is not supported: 2 → 1”，这是预期保护行为；最终 84 项测试通过。剪贴板测试使用模拟通道，不改动用户真实剪贴板。文件数据库重开验证不代替实际进程重启或 Android 设备测试。
+
+2026-10-16 的 Android 首轮构建曾出现 Java 路径空值异常，独立重跑通过，详情保留在 CHANGELOG。本次串行构建成功，没有将历史失败或通过结果混为本次结果。
+
+本次默认 PowerShell 已可启动；普通沙箱下访问外部 SDK 时 Dart 路径解析仍失败，获准使用提升权限入口后工具正常运行。工作区没有携带被 Git 忽略的 SDK／缓存，验证时通过单次进程变量复用原项目工具链；Git 所有权提示通过单次安全目录配置处理。临时盘符映射在验证后移除，未修改永久 PATH、Git 配置或 SDK 源码。具体排查、初次失败与最终结果见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 常见环境问题
+
+- 如果 PowerShell 阻止执行 `flutter.ps1`，使用 `.\tool\flutter.cmd`；无需修改永久执行策略。
+- Android SDK 的组件安装与许可在 Android Studio 的 `Tools > SDK Manager` 中管理；本项目使用 Android 36 平台、NDK 28.2.13676358，其他组件按实际依赖补齐。检查命令为 `.\tool\flutter.cmd doctor` 和 `.\tool\flutter.cmd doctor --android-licenses`。
+- Flutter 的 HTTP／HTTPS 代理环境变量不等于 Gradle 的 JVM 代理设置。需要时仅为当前构建进程设置 `GRADLE_OPTS` 并恢复，不把本机代理地址或机器路径提交到共享配置。历史处理过程见 CHANGELOG。

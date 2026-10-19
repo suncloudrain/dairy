@@ -21,3 +21,6 @@ coverage/
 # OS files
 .DS_Store
 Thumbs.db
+/dairy.exe
+/*.dll
+/data/

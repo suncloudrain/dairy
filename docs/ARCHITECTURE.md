@@ -1,10 +1,10 @@
 # 项目架构：v0.1
 
-更新日期：2026-10-10
+更新日期：2026-10-17
 
-状态：方案 A 的基础工程、SQLite 数据层、仓库及日记编辑／自动保存已实现。回收站操作与任务编辑等完整业务界面待实现；实际完成范围见第 9 节。
+状态：方案 A 的基础工程、SQLite 数据层、仓库、日记编辑／自动保存／改期／软删除、完整回收站流程和任务基本功能已实现。平台完整交互及发行验收待完成。实际技术组成与实现边界见第 9 节，最近检查和构建结果见 README。
 
-本文回答“软件由哪些部分组成、数据如何流动”。产品行为见 [PRODUCT.md](PRODUCT.md)，取舍理由见 [DECISIONS.md](DECISIONS.md)。本文同时保留后续功能设计，未落地部分明确标记，运行与验证说明见 [README.md](../README.md)。
+本文回答“软件由哪些部分组成、数据如何流动”。产品行为见 [PRODUCT.md](PRODUCT.md)，取舍理由见 [DECISIONS.md](DECISIONS.md)。本文同时保留后续功能设计，未落地部分明确标记，运行与最近验证摘要见 [README.md](../README.md)，历次迭代与详细验证见 [CHANGELOG.md](../CHANGELOG.md)。
 
 ## 1. 总体结构
 
@@ -40,8 +40,8 @@ SQLite 数据层：数据库连接、查询、事务、约束、版本升级
 | `lib/main.dart` | 启动应用，调用初始化流程 |
 | `lib/app/` | 应用根组件、主导航、平台初始化以及对象组装 |
 | `lib/models/` | DiaryEntry、Task、TaskType 等不可变数据对象和日期范围规则 |
-| `lib/features/diary/` | 日记列表、编辑页面及编辑状态；回收站仍为只读列表，删除详情和操作按钮待实现 |
-| `lib/features/tasks/` | 已有四类任务只读列表和页面状态；编辑与操作界面待实现 |
+| `lib/features/diary/` | 日记／回收站列表、日记编辑及保存协调、回收站只读详情页面和恢复状态 |
+| `lib/features/tasks/` | 任务列表与编辑页面、TaskListModel／TaskEditorModel、共用范围显示和日期选择控件 |
 | `lib/data/repositories/` | DiaryRepository、TaskRepository；统一业务数据操作 |
 | `lib/data/database/` | AppDatabase、日记和任务查询、行数据转换、数据库升级 |
 | `test/` | 日期规则、仓库、数据库、自动保存和关键 Widget 测试 |
@@ -160,7 +160,7 @@ SQLite 数据层：数据库连接、查询、事务、约束、版本升级
 
 ## 5. 关键数据流
 
-以下描述包含已实现与后续目标流程：基础查询、仓库保存／删除／恢复、日记编辑快照、自动保存和离页提交已实现；已保存日记日期修改、编辑页删除、回收站操作及剪贴板界面仍待后续阶段。
+以下核心业务流程均已有实现：查询、保存、软删除、恢复、日记自动保存与离页提交、显式改期、回收站详情及手动复制。设备上的完整交互验收与发行验证仍须独立执行。
 
 ### 5.1 日记读取与自动保存
 
@@ -178,21 +178,28 @@ SQLite 数据层：数据库连接、查询、事务、约束、版本升级
 
 ### 5.2 日记日期修改、删除和恢复
 
-- 日期修改：先验证目标日期，数据库写入时再依靠唯一约束兜底。冲突不改变原记录日期，不覆盖另一篇日记，编辑内容留在页面。
-- 删除：协调同一日记的保存队列，保留当前内容并写入 deleted_at 和 updated_at；相关写入应保持原子性。成功后停止后续自动保存并刷新正常列表及回收站。
+- 日期修改：`DiaryEditorPage._chooseDate` 收到日历确认后调用 `_changeDate` → `DiaryEditorModel.changeDate` 标记独占改期 → `_flushContent` 等待已有快照并保存原日期下的最新内容 → 既有 `DiaryRepository.save`／`DiaryQueries.updateContent` 在事务中提交新日期 → 成功后才更新 `_date` 和 `_entry`。两个保存步骤有明确先后；原内容提交成功后，改期仍可能独立失败。
+- 改期期间输入和离页暂时禁用；公开 `flush` 返回正在进行的改期 Future，后台通知不会另起一次旧日期写入。日期冲突和其他失败保持原日期，`failedDate` 仅在内存保留重试目标，页面显示“重试修改日期”；正文预提交失败则走已有“重试保存”。
+- 改期成功只更新页面和提示，不调用 Navigator 返回；继续输入沿用新日期。用户“保存并返回”或正常返回后列表重新读取并按新日期排序。新草稿仍使用 `chooseDate`，只选日期不创建记录。
+- 删除：`DiaryEditorPage._delete` 确认后调用 `DiaryEditorModel.deleteEntry`；`_flushContent` 等待旧快照并提交最新内容，再调用注入的 `DiaryRepository.softDelete` → `DiaryQueries.setDeleted`，在同一事务中写 deleted_at 和 updated_at。成功后 `_deleted` 将本编辑会话置为不可再写入，取消计时器，页面返回，正常列表重新查询。
+- 内容提交与软删除是先后两次操作，不是跨步骤事务；内容成功但删除失败时，最新内容仍保存在正常记录中，显示“重试删除”。内容保存失败则不尝试删除。公开 `flush` 在删除进行中返回同一个 Future，不会另起旧快照写入；删除与改期互斥。
 - 普通保存不能更新已软删除记录，不能在更新失败后通过无条件插入把记录复活。
-- 恢复：将目标记录的 deleted_at 清空并更新 updated_at，保留 ID 和原数据。数据库唯一约束保证冲突时整个恢复失败，记录仍在回收站。
+- 恢复：`DiaryTrashDetailPage._restore` → `DiaryTrashDetailModel.restore` → `DiaryRepository.restore` → `DiaryQueries.setDeleted` 清空 deleted_at 并更新 updated_at，保留 ID 和原数据。数据库唯一约束保证冲突时整个恢复失败；详情页展示错误，不离页、不覆盖。成功返回回收站，`DiaryPage._openDeleted` 重新加载；退出回收站后正常列表也重新读取。
 - 恢复前的冲突检查只用于友好提示，不能替代写入时的约束。
-- 复制正文：只读已删除内容，由页面调用剪贴板 API；不产生数据库修改，不改变 updated_at。
-- 冲突后打开现有日记：查找同日期未删除日记的 UUID，再正常导航，不自动追加或覆盖内容。
+- 复制正文：详情页使用 SelectableText 展示正文，用户点击“复制正文”后由页面调用 Flutter Clipboard.setData，成功或失败都有提示；不产生数据库修改，不改变 updated_at。状态对象不接触剪贴板或 Navigator。
+- 冲突后打开现有日记：`DiaryTrashDetailModel.findExisting` 通过仓库查找同日期未删除记录，页面再进入原有 DiaryEditorPage；返回仍在回收站详情。打开本身不追加、覆盖或恢复任何内容，用户可以自行粘贴编辑。
 
 ### 5.3 任务编辑与完成
 
-1. 页面状态保存尚未提交的表单；切换类型后根据输入计算对应合法范围。
-2. 点击保存后，TaskRepository 验证标题、类型和范围，创建或更新同一个任务 ID。
-3. 数据库提交成功后返回结果，列表重新查询或接收明确的状态通知，展示持久化后的数据。
-4. 标记完成在同一次原子写入中修改 is_completed、completed_at 和 updated_at。
-5. 撤销完成同样原子更新状态并清空 completed_at；软删除保留完成状态和完成时间。
+1. `TaskEditorPage` 的输入框／类型选择把变化交给 `TaskEditorModel`；表单和初始快照留在内存，`dirty` 用于离页提示。草稿会话 UUID 固定，输入不写库。
+2. 点击“保存”调用 `TaskEditorModel.saveTask`：校验必填标题和有效范围、进入忙碌状态，再调用注入的 `TaskRepository.save`。
+3. 仓库复用现有事务与 `TaskQueries` 写入 SQLite。编辑保留 ID、created_at 和完成状态；失败保留表单，不离页，重试复用同一 ID。
+4. 成功后 `Navigator.pop` 返回持久化任务，`TasksPage._openTask` 调用 `TaskListModel.focusTask`，选择其类型／周期并把完成筛选重置为“全部”，然后 `load` 重新读取。
+5. 列表复选框 → `TaskListModel.setCompleted` → `TaskRepository.setCompleted` → SQLite 原子更新完成状态、completed_at 和 updated_at → 查询刷新。撤销清空完成时间。
+6. 删除弹窗确认后，列表或编辑状态调用 `TaskRepository.softDelete`；只写删除标记和修改时刻，保留完成信息。编辑页有未保存输入时提醒将其放弃；成功才返回／刷新。
+7. `task_period_controls.dart` 仅提供显示和日期选择；自然周期与自定义范围计算仍由 `TaskPeriod` 承担。月／年选择不借助无关的“某一天”表达。
+
+页面处理导航、弹窗和输入控制器；状态对象处理表单、请求和错误，不依赖 Navigator；仓库不引用 Widget，页面不执行 SQL。使用既有 schema v1，没有新增依赖、草稿表或同步服务。
 
 本版本优先采用提交成功后刷新列表的简单方式，不要求引入响应式数据库流或乐观更新回滚框架。
 
@@ -241,22 +248,22 @@ SQLite 数据层：数据库连接、查询、事务、约束、版本升级
 
 新增依赖、调整分层或改变存储语义前先查 DECISIONS.md。实际代码偏离本文时同步修改文档；重大变化追加决策记录，说明影响和迁移方式。
 
-## 9. 当前实现状态（2026-10-10）
+## 9. 当前技术组成与实现边界（2026-10-17）
 
-- `app/app_dependencies.dart` 是组装入口：平台驱动 → 应用数据目录中的 dairy.sqlite → AppDatabase → 两个仓库。
-- `app/dairy_app.dart` 提供中文 Material 本地化、初始化等待和失败重试；`app_shell.dart` 在窗口宽度 720 处切换导航布局。
-- `models/local_date.dart` 以日历日期表达业务日期，`task_period.dart` 验证自然周期与 CUSTOM，避免使用本地午夜加固定小时数。
-- `data/database/schema.dart` 管理 schema v1，两张表和三个索引；尚无历史版本迁移，未知升级和降级明确失败，不能删除用户数据库。
-- `*_queries.dart` 包含 SQL 和行映射；仓库提供查询、幂等内容保存、软删除、日记恢复及任务状态操作。
-- 新草稿通过仓库 `newId()` 取得 ID，保存和失败重试复用；仅取得 ID 不插入记录。普通保存保留创建时间和任务完成元数据，禁止复活软删除记录。
-- 日记列表接入仅含铅笔图标的“写今天”、选择日期新建和已有记录编辑；图标保留提示与无障碍名称，当天已有日记时复用原记录，显式新建遇到重复日期时弹窗提醒。
-- 列表有标题时展示标题、日期和正文摘要；无标题时日期只出现一次；空正文显示“暂无正文”。这些展示规则由 diary_page.dart 处理，不写回存储，不增加数据层逻辑或数据库迁移。
-- `diary_editor_page.dart` 使用 Material 输入框、Navigator、PopScope 和生命周期观察；返回前等待保存，失败保留页面与输入，日期冲突提示不覆盖已有日记。
-- `diary_editor_model.dart` 使用 ChangeNotifier 与 Dart Timer：约 800 毫秒停顿提交、约 5 秒持续输入提交。一个写入执行期间合并待保存输入，后续提交最新快照；按内存编辑版本判断是否全部保存，失败暂停并允许重试。
-- 编辑状态通过构造函数接收 `DiarySave` 回调，生产环境传入现有仓库的 `save`；测试可控制写入延迟和失败，不增加仓库框架或新依赖。首次输入前不创建记录，保存后清空不删除。
-- 新建草稿首次持久化前可以选择日期；已保存日记本阶段固定日期，编辑内容保留创建时间。产品中的显式日期修改另行实现。
-- 数据库 schema 保持 v1，自动保存直接写入既有日记表，不添加独立草稿表、同步版本或历史表。
-- 回收站与任务页面仍为只读列表，删除／恢复／复制及任务编辑等操作按后续阶段实现。
-- ChangeNotifier 列表状态处理加载、失败重试与过期请求结果，UI 不直接引用数据库。
-- Android 和 Windows 已生成平台工程。iOS 仅作为未来候选，在驱动初始化处兼容，不视为当前已适配平台。
-- 自动化检查与平台构建的具体结果见 README.md；平台工具链缺失不能算作发行验收通过。
+本节是当前代码的技术快照，代码演进后随之更新；它不按日期追加迭代流水。用户可见功能概况见 [README.md](../README.md)，历史变化与当次验证见 [CHANGELOG.md](../CHANGELOG.md)。前面的设计流程包含已实现与待实现部分，以本节区分。
+
+| 部分 | 当前实际组成与职责 | 当前边界 |
+| --- | --- | --- |
+| 应用组装与导航 | `app_dependencies.dart` 选择平台驱动、应用数据目录和仓库；`dairy_app.dart` 处理中文本地化、启动及重试；`app_shell.dart` 在窗口宽度 720 处切换导航 | Android／Windows 工程已建立；iOS 仅有驱动兼容分支，尚未适配或验证 |
+| 模型 | `LocalDate` 表达独立日历日期；`TaskPeriod` 验证自然周期与 CUSTOM；日记／任务使用不可变对象 | 日期与 UTC 时刻分开；没有同步版本、富文本或附件模型 |
+| 页面与列表状态 | 日记列表与编辑器、回收站列表和只读详情、任务列表；ChangeNotifier 处理加载、操作、筛选、刷新与过期请求结果 | 完整平台交互验收待完成；没有全局响应式数据库缓存 |
+| 日记编辑状态 | `DiaryEditorModel` 使用定时器、固定 UUID 和串行快照；`changeDate`／`deleteEntry` 互斥，删除前等待保存、成功后停止会话写入；注入仓库 save／softDelete 回调 | 没有持久化草稿；失败目标只在内存；内存版本不是同步版本 |
+| 日记页面协调 | `DiaryEditorPage` 管理改期、删除确认、输入冻结、Navigator、PopScope 与生命周期通知；正常返回等待 flush；`DiaryPage` 管理列表和回收站导航及重读 | 改期成功留在编辑页，删除成功返回列表；没有永久删除或批量操作 |
+| 回收站详情 | `DiaryTrashDetailPage` 展示只读内容、调用 Clipboard、处理导航；`DiaryTrashDetailModel` 调用仓库恢复／查找现有日记，管理错误和忙碌状态 | 恢复失败不离页；不自动复制、合并或覆盖；无任务回收站 |
+| 任务编辑 | `TaskEditorPage` 管理表单控制器、PopScope、关闭通知与确认；`TaskEditorModel` 管理内存草稿、校验、忙碌与保存／删除；`task_period_controls.dart` 复用日期选择与显示 | 手动保存；无持久化草稿、任务回收站或完成历史；完整平台交互验收待完成 |
+| 仓库 | 日记／任务仓库统一业务校验、事务、UUID、时间及保存／查询／软删除／恢复／完成入口 | 数据入口不等于对应 UI 已交付；普通保存不复活删除记录，相同内容不更新时间 |
+| SQLite | schema v1，两张表、三个索引；`AppDatabase` 管理连接，`*_queries.dart` 处理 SQL 与行映射 | 没有真实历史迁移；未知升／降级明确失败，不删除用户数据。未来升版必须增加实际迁移 |
+
+依赖边界继续保持“页面 → 页面状态 → 仓库 → SQLite”，页面不执行 SQL，仓库不引用 Widget。日记自动保存直接写入既有日记表，不添加另一套保存流程或草稿表；实际流程详见第 5 节。
+
+验证状态分开维护：本文件说明技术组成与限制，README 给出最近摘要，CHANGELOG 保存各次检查结果。工具链可用、构建通过与设备／发行验收是不同状态，不能互相替代。
